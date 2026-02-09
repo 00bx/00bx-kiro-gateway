@@ -1,58 +1,45 @@
 # 00bx-kiro-gateway
 
-Use Claude models for free inside [OpenCode](https://opencode.ai) — powered by [Kiro CLI](https://kiro.dev) credentials.
-
-No API keys. No localhost servers. No monthly bills. Just plug it in and go.
+[AI SDK](https://sdk.vercel.ai) provider that lets [OpenCode](https://opencode.ai) use Claude models through [Kiro CLI](https://kiro.dev)'s free-tier credits.
 
 ## How it works
 
-Kiro is Amazon's free AI IDE. When you install it and sign in, it stores AWS credentials on your machine. This package reads those credentials and uses them to talk to Claude directly — so OpenCode can use Claude without you paying anything.
+[Kiro](https://kiro.dev) is Amazon's AI IDE. It comes with free credits for Claude models. When you sign in to Kiro, it stores auth tokens locally. This package reads those tokens and routes OpenCode requests through the same backend — so you can use your Kiro free-tier credits directly inside OpenCode.
 
-It's a drop-in [Vercel AI SDK](https://sdk.vercel.ai) provider. OpenCode loads it automatically from npm. You just add a few lines to your config file.
+## Models
 
-## Available models
-
-| Model | Config ID | Notes |
+| Model | Config ID | Status |
 |---|---|---|
-| Claude Sonnet 4 | `claude-sonnet-4` | Best balance of speed and quality |
-| Claude Sonnet 4.5 | `claude-sonnet-4-5` | Latest and smartest Sonnet |
-| Claude Haiku 4.5 | `claude-haiku-4-5` | Fastest, least rate-limited |
-| Claude Opus 4.5 | `claude-opus-4-5` | Most capable, slowest |
+| Claude Sonnet 4 | `claude-sonnet-4` | Working |
+| Claude Sonnet 4.5 | `claude-sonnet-4-5` | Working |
+| Claude Haiku 4.5 | `claude-haiku-4-5` | Working |
+| Claude Opus 4.5 | `claude-opus-4-5` | Currently disabled by Kiro (capacity limits) |
 
-All models support streaming, tool use (file reads, writes, search, etc.), and multi-turn conversations.
+> **Opus 4.5 note:** Kiro's servers have disabled Opus 4.5 due to capacity constraints on their end. The config is included so it works automatically whenever Kiro re-enables it — no update needed on your side.
+
+All working models support streaming, tool use, and multi-turn conversations.
 
 ## Setup
 
-Takes about 2 minutes.
+### 1. Install and sign in to Kiro
 
-### Step 1 — Install Kiro CLI
-
-**macOS:**
 ```bash
 brew install --cask kiro
 ```
 
-**Other platforms:** Download from [kiro.dev](https://kiro.dev).
+Or download from [kiro.dev](https://kiro.dev).
 
-Open Kiro once and sign in with your **AWS Builder ID** (it's free — create one at [profile.aws](https://profile.aws) if you don't have one). Once you're signed in, you can close Kiro. The credentials stay on your machine.
+Open Kiro, sign in with your **AWS Builder ID** (create one at [profile.aws](https://profile.aws.amazon.com) if needed), then you can close it. The credentials stay on your machine.
 
-### Step 2 — Install OpenCode
-
-If you don't have OpenCode yet:
+### 2. Install OpenCode
 
 ```bash
 curl -fsSL https://opencode.ai/install | bash
 ```
 
-### Step 3 — Configure the provider
+### 3. Add the provider config
 
-Open (or create) your OpenCode config file:
-
-```bash
-nano ~/.config/opencode/opencode.json
-```
-
-Paste this:
+Edit `~/.config/opencode/opencode.json`:
 
 ```json
 {
@@ -83,55 +70,43 @@ Paste this:
 }
 ```
 
-> **Already have an opencode.json?** Just add the `"kiro": { ... }` block inside your existing `"provider"` section. Don't overwrite your other providers.
+If you already have other providers configured, add the `"kiro"` block inside your existing `"provider"` object.
 
-### Step 4 — Use it
-
-Launch OpenCode with a Kiro model:
+### 4. Run
 
 ```bash
+# Interactive
 opencode -m kiro/claude-sonnet-4
-```
 
-Or start OpenCode normally and switch models from the model picker — your Kiro models will show up there.
-
-You can also run one-off commands:
-
-```bash
+# Single command
 opencode run -m kiro/claude-sonnet-4 "explain this codebase"
 ```
 
-That's it. It handles everything else — token refresh, retries, streaming, tool calls.
+## Multiple accounts
 
-## Tips
+If you have more than one AWS Builder ID, you can switch between them in Kiro IDE at any time. The gateway detects the account change automatically on the next request — it re-reads Kiro's local database before every API call. When it sees a different refresh token, it drops the old session and starts using the new account's credentials.
 
-- **Start with `claude-sonnet-4`** — it's fast, smart, and has the most generous rate limits.
-- **Getting rate-limited?** Switch to `claude-haiku-4-5`. It's the least restricted model.
-- **Session expired?** Just open Kiro IDE again briefly. It refreshes your credentials automatically.
-- **Works everywhere OpenCode works** — macOS, Linux. Anywhere you can install Kiro CLI.
-- **No background processes** — this isn't a proxy server. It's a library that OpenCode loads directly.
+This means you can rotate between accounts to use each account's free-tier credits without restarting OpenCode.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| `Kiro refresh token not found` | Open Kiro IDE and sign in. Credentials are stored after first sign-in. |
-| Empty or no response | Try `claude-haiku-4-5` (least rate-limited). You may have hit a rate limit. |
-| Token/auth errors | Reopen Kiro IDE to refresh your session, then try again. |
-| OpenCode doesn't show Kiro models | Make sure the config is valid JSON. Check for trailing commas or typos. |
-| Slow first response | First request takes a few extra seconds to refresh the auth token. Normal after that. |
+| `Kiro refresh token not found` | Open Kiro IDE and sign in. |
+| Empty or no response | You may have hit a rate limit. Try `claude-haiku-4-5` — it has the highest limits. |
+| Token/auth errors | Reopen Kiro IDE to refresh your session. |
+| Opus 4.5 not responding | Kiro has it disabled for now due to capacity. Use Sonnet 4 or 4.5 instead. |
+| OpenCode doesn't show Kiro models | Check your `opencode.json` for valid JSON (no trailing commas). |
 
-## How it works (technical)
+## Technical details
 
-For those who care about the internals:
-
-1. Reads Kiro CLI's stored refresh token from a local SQLite database
+1. Reads Kiro CLI's refresh token from its local SQLite database (`bun:sqlite` → `better-sqlite3` → `sqlite3` CLI fallback)
 2. Exchanges it for a short-lived access token via Kiro's auth endpoint
-3. Sends your prompt to AWS CodeWhisperer's streaming API
-4. Parses the AWS binary event stream protocol and translates it to Vercel AI SDK V2 stream format
-5. Handles tool calls, retries, token refresh, rate limiting, and stream timeouts automatically
+3. Sends prompts to the AWS CodeWhisperer streaming API
+4. Parses the AWS binary event stream protocol into AI SDK V2 stream format
+5. Handles token refresh, 403 retry, 429/5xx backoff, idle stream timeouts, and tool-call accumulation
 
-Zero runtime dependencies. Works with Bun (which OpenCode uses internally) and Node.js.
+Zero runtime dependencies. Works with Bun and Node.js.
 
 ## License
 
