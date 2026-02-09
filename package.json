@@ -1,7 +1,7 @@
 {
   "name": "00bx-kiro-gateway",
-  "version": "1.0.8",
-  "description": "AI SDK provider for free Claude models via Kiro CLI — use with OpenCode",
+  "version": "1.0.9",
+  "description": "AI SDK provider that lets OpenCode use Claude models through Kiro CLI's free-tier credits",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
