@@ -1,120 +1,76 @@
 # 00bx-kiro-gateway
 
-Free Claude models in [OpenCode](https://opencode.ai) via [Kiro CLI](https://kiro.dev).
+Use Claude models for free inside [OpenCode](https://opencode.ai).
 
-No API keys. No payments. No localhost servers. Just install Kiro CLI, log in, and use Claude for free.
+This is an AI SDK provider that connects OpenCode to Claude through [Kiro CLI](https://kiro.dev) credentials. No API keys, no proxies, no servers running in the background. You just add it to your config and it works.
 
-## Supported Models
+## What you get
 
-| Model | ID |
-|---|---|
-| Claude Opus 4.5 | `claude-opus-4-5` |
-| Claude Sonnet 4.5 | `claude-sonnet-4-5` |
-| Claude Sonnet 4 | `claude-sonnet-4` |
-| Claude Haiku 4.5 | `claude-haiku-4-5` |
+- Claude Sonnet 4.5
+- Claude Sonnet 4
+- Claude Haiku 4.5
+- Claude Opus 4.5
 
-## Setup (2 minutes)
+All free. Kiro gives you access to Claude through AWS CodeWhisperer, and this package plugs that directly into OpenCode.
 
-### Step 1: Install Kiro CLI
+## Quick start
 
-```bash
-# macOS
-brew install --cask kiro
+**1. Get Kiro CLI**
 
-# or download from https://kiro.dev
-```
+Download from [kiro.dev](https://kiro.dev) or `brew install --cask kiro` on mac. Open it once, sign in with your AWS Builder ID (it's free), then you can close it. The login credentials stay on your machine.
 
-### Step 2: Log into Kiro
+**2. Add this to your `~/.config/opencode/opencode.json`**
 
-Open Kiro IDE once, sign in with your AWS Builder ID (free). Close it after login. That's it — the credentials are saved locally.
-
-### Step 3: Add to OpenCode
-
-Open `~/.config/opencode/opencode.json` and add the `kiro` provider:
+Drop this into your `provider` section:
 
 ```json
-{
-  "provider": {
-    "kiro": {
-      "npm": "00bx-kiro-gateway",
-      "name": "Kiro Gateway",
-      "models": {
-        "claude-sonnet-4-5": {
-          "name": "Claude Sonnet 4.5 (Kiro)",
-          "limit": { "context": 200000, "output": 8192 }
-        },
-        "claude-sonnet-4": {
-          "name": "Claude Sonnet 4 (Kiro)",
-          "limit": { "context": 200000, "output": 8192 }
-        },
-        "claude-haiku-4-5": {
-          "name": "Claude Haiku 4.5 (Kiro)",
-          "limit": { "context": 200000, "output": 8192 }
-        },
-        "claude-opus-4-5": {
-          "name": "Claude Opus 4.5 (Kiro)",
-          "limit": { "context": 200000, "output": 8192 }
-        }
-      }
+"kiro": {
+  "npm": "00bx-kiro-gateway",
+  "name": "Kiro Gateway",
+  "models": {
+    "claude-sonnet-4-5": {
+      "name": "Claude Sonnet 4.5",
+      "limit": { "context": 200000, "output": 8192 }
+    },
+    "claude-sonnet-4": {
+      "name": "Claude Sonnet 4",
+      "limit": { "context": 200000, "output": 8192 }
+    },
+    "claude-haiku-4-5": {
+      "name": "Claude Haiku 4.5",
+      "limit": { "context": 200000, "output": 8192 }
+    },
+    "claude-opus-4-5": {
+      "name": "Claude Opus 4.5",
+      "limit": { "context": 200000, "output": 8192 }
     }
   }
 }
 ```
 
-### Step 4: Use it
+**3. Open OpenCode, pick a Kiro model, and start coding.**
 
-Launch OpenCode, switch to any Kiro model, start coding.
+That's it. No env vars, no tokens to paste, nothing else to set up.
 
-```bash
-opencode
-```
+## What's happening under the hood
 
-## How It Works
+When you pick a Kiro model in OpenCode, this package:
 
-```
-OpenCode → 00bx-kiro-gateway → Kiro Auth → AWS CodeWhisperer API → Claude
-```
+1. Reads your Kiro login from the local database (the one Kiro CLI created when you signed in)
+2. Gets a fresh access token from AWS
+3. Sends your messages to Claude through the CodeWhisperer API
+4. Streams the response back
 
-1. Reads your Kiro CLI credentials from the local SQLite database
-2. Refreshes the access token automatically
-3. Sends requests to AWS CodeWhisperer's Claude endpoint
-4. Streams responses back to OpenCode via the AI SDK protocol
+It handles token refresh, retries, rate limits, and all the weird edge cases automatically. You don't have to think about any of it.
 
-No proxy server. No background process. It's a direct npm provider that OpenCode loads natively.
+## If something goes wrong
 
-## Features
+**"Kiro refresh token not found"** — You need to open Kiro IDE and sign in first. It stores credentials locally and this package reads from there.
 
-- **Zero config** — auto-detects Kiro CLI credentials
-- **Zero dependencies** — no native addons, instant install
-- **Auto token refresh** — handles expiry, 403 retries, rate limits
-- **Streaming** — full streaming support with AWS binary event stream parsing
-- **Tool calling** — complete tool/function calling support
-- **Context compaction** — handles OpenCode's conversation compaction gracefully
-- **Cross-platform** — macOS, Linux, Windows
+**Empty responses** — Some models hit free tier limits. Switch to `claude-haiku-4-5`, it's the most generous.
 
-## Troubleshooting
-
-### "Kiro refresh token not found"
-
-Kiro CLI isn't installed or you haven't logged in. Open Kiro IDE, sign in, close it.
-
-### Model returns empty response
-
-Some models may have usage limits on the free tier. Try switching to `claude-haiku-4-5` which has the most generous limits.
-
-### Token refresh fails
-
-Your Kiro session may have expired. Open Kiro IDE again to refresh the session, then retry.
-
-## Requirements
-
-- [Kiro CLI](https://kiro.dev) — installed and logged in
-- [OpenCode](https://opencode.ai) — v0.1.0 or later
+**Token errors** — Your Kiro session might have expired. Just open Kiro IDE again to refresh it.
 
 ## License
 
-MIT
-
-## Credits
-
-Made by [00bx](https://github.com/00bx)
+MIT — by [00bx](https://github.com/00bx)
