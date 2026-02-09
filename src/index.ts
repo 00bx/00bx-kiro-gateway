@@ -114,11 +114,24 @@ function createKiroLanguageModel(modelId: string): LanguageModelV2 {
       const textParts: string[] = [];
       const reader = body.getReader();
 
+      // Idle timeout: cancel reader if no data for 15s (Kiro may keep connection open)
+      let idleTimer: ReturnType<typeof setTimeout> | null = null;
+      const resetIdleTimer = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          reader.cancel().catch(() => {});
+        }, 15_000);
+      };
+
       try {
+        resetIdleTimer();
+
         // eslint-disable-next-line no-constant-condition
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+
+          resetIdleTimer();
 
           const events = parser.feed(value);
           for (const event of events) {
@@ -126,8 +139,16 @@ function createKiroLanguageModel(modelId: string): LanguageModelV2 {
               textParts.push(event.data as string);
             }
           }
+
+          if (parser.isComplete()) {
+            reader.cancel().catch(() => {});
+            break;
+          }
         }
+      } catch {
+        // Reader cancelled or stream error — use whatever was collected
       } finally {
+        if (idleTimer) clearTimeout(idleTimer);
         reader.releaseLock();
       }
 
@@ -172,108 +193,100 @@ function createKiroLanguageModel(modelId: string): LanguageModelV2 {
       if (!body) throw new Error("Empty response from Kiro API");
 
       const parser = new AwsEventStreamParser();
-      const reader = body.getReader();
-      let textStartEmitted = false;
       const textId = "text-0";
-      let readerDone = false;
 
-      const stream = new ReadableStream<LanguageModelV2StreamPart>({
-        async pull(controller) {
-          if (readerDone) {
-            controller.close();
-            return;
-          }
+      // Use TransformStream as a push-based approach (Bun-compatible)
+      const { readable, writable } = new TransformStream<LanguageModelV2StreamPart, LanguageModelV2StreamPart>();
+      const writer = writable.getWriter();
 
-          try {
-            const { done, value } = await reader.read();
+      // Consume the response body in a fire-and-forget async loop
+      (async () => {
+        let textStartEmitted = false;
 
-            if (done) {
-              readerDone = true;
+        try {
+          const reader = body.getReader();
 
-              // Emit tool calls that were collected during streaming
-              const toolCalls = parser.getToolCalls();
+          // Idle timeout: cancel the reader if no data arrives for 15s.
+          // This works in Bun because we cancel() the reader directly,
+          // which causes the pending reader.read() to resolve with { done: true }.
+          let idleTimer: ReturnType<typeof setTimeout> | null = null;
+          const resetIdleTimer = () => {
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+              reader.cancel().catch(() => {});
+            }, 15_000);
+          };
 
-              // Close any open text stream
-              if (textStartEmitted) {
-                controller.enqueue({ type: "text-end", id: textId } as LanguageModelV2StreamPart);
-              }
+          resetIdleTimer(); // Start the initial idle timer
 
-              // Emit tool call stream parts
-              for (let i = 0; i < toolCalls.length; i++) {
-                const tc = toolCalls[i];
-                const toolId = `tool-${i}`;
-                controller.enqueue({
-                  type: "tool-input-start",
-                  id: toolId,
-                  toolName: tc.name,
-                } as LanguageModelV2StreamPart);
-                controller.enqueue({
-                  type: "tool-input-delta",
-                  id: toolId,
-                  delta: tc.arguments,
-                } as LanguageModelV2StreamPart);
-                controller.enqueue({
-                  type: "tool-input-end",
-                  id: toolId,
-                } as LanguageModelV2StreamPart);
-                controller.enqueue({
-                  type: "tool-call",
-                  toolCallId: tc.id,
-                  toolName: tc.name,
-                  input: tc.arguments,
-                } as LanguageModelV2StreamPart);
-              }
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const result = await reader.read();
 
-              const finishReason = toolCalls.length > 0 ? "tool-calls" : "stop";
+            if (result.done) break;
 
-              controller.enqueue({
-                type: "finish",
-                finishReason,
-                usage: {
-                  inputTokens: undefined,
-                  outputTokens: undefined,
-                  totalTokens: undefined,
-                },
-              } as LanguageModelV2StreamPart);
+            // Data arrived — reset the idle timer
+            resetIdleTimer();
 
-              controller.close();
-              return;
-            }
-
-            const events = parser.feed(value);
+            const events = parser.feed(result.value!);
             for (const event of events) {
               if (event.type === "content") {
                 if (!textStartEmitted) {
-                  controller.enqueue({
+                  await writer.write({
                     type: "text-start",
                     id: textId,
                   } as LanguageModelV2StreamPart);
                   textStartEmitted = true;
                 }
-                controller.enqueue({
+                await writer.write({
                   type: "text-delta",
                   id: textId,
                   delta: event.data as string,
                 } as LanguageModelV2StreamPart);
               }
-              // Tool events are collected by the parser and emitted at stream end
             }
-          } catch (err) {
-            controller.enqueue({
-              type: "error",
-              error: err,
-            } as LanguageModelV2StreamPart);
-            controller.close();
-          }
-        },
 
-        cancel() {
-          reader.cancel().catch(() => {});
-        },
-      });
+            // Kiro finished: usage received + no pending tool call.
+            // Don't wait for reader done — Kiro may keep the connection open.
+            if (parser.isComplete()) {
+              if (idleTimer) clearTimeout(idleTimer);
+              reader.cancel().catch(() => {});
+              break;
+            }
+          }
+
+          // Clean up idle timer
+          if (idleTimer) clearTimeout(idleTimer);
+        } catch {
+          // Stream read error or reader.cancel() — emit finish with whatever we have
+        }
+
+        // Emit finish: close text, emit tool calls, emit finish event
+        const toolCalls = parser.getToolCalls();
+
+        if (textStartEmitted) {
+          await writer.write({ type: "text-end", id: textId } as LanguageModelV2StreamPart);
+        }
+
+        for (const tc of toolCalls) {
+          await writer.write({ type: "tool-input-start", id: tc.id, toolName: tc.name } as LanguageModelV2StreamPart);
+          await writer.write({ type: "tool-input-delta", id: tc.id, delta: tc.arguments } as LanguageModelV2StreamPart);
+          await writer.write({ type: "tool-input-end", id: tc.id } as LanguageModelV2StreamPart);
+          await writer.write({ type: "tool-call", toolCallId: tc.id, toolName: tc.name, input: tc.arguments } as LanguageModelV2StreamPart);
+        }
+
+        const finishReason = toolCalls.length > 0 ? "tool-calls" : "stop";
+        await writer.write({
+          type: "finish",
+          finishReason,
+          usage: { inputTokens: undefined, outputTokens: undefined, totalTokens: undefined },
+        } as LanguageModelV2StreamPart);
+
+        await writer.close();
+      })();
 
       return {
-        stream,
+        stream: readable,
         request: { body: payload },
       };
     },

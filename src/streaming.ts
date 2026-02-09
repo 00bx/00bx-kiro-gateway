@@ -77,9 +77,12 @@ function extractJsonPayloads(rawBuffer: Uint8Array): { payloads: string[]; remai
 
 function detectEventType(data: Record<string, unknown>): ParsedEvent["type"] | null {
   if ("content" in data) return "content";
-  if ("name" in data) return "tool_start";
-  if ("input" in data && !("name" in data)) return "tool_input";
-  if ("stop" in data && !("name" in data)) return "tool_stop";
+  // Tool stop: has "stop" field (may also have "name" and "toolUseId")
+  if ("stop" in data && data.stop === true) return "tool_stop";
+  // Tool input: has "input" field (Kiro also sends "name"+"toolUseId" on every chunk)
+  if ("input" in data) return "tool_input";
+  // Tool start: has "name" but no "input" and no "stop"
+  if ("name" in data && "toolUseId" in data) return "tool_start";
   if ("followupPrompt" in data) return "followup";
   if ("usage" in data) return "usage";
   if ("contextUsagePercentage" in data) return "context_usage";
@@ -97,6 +100,7 @@ export class AwsEventStreamParser {
     arguments: string;
   } | null = null;
   toolCalls: CollectedToolCall[] = [];
+  private seenUsage = false;
 
   feed(chunk: Uint8Array | string): ParsedEvent[] {
     // Convert string to bytes if needed
@@ -166,14 +170,24 @@ export class AwsEventStreamParser {
         return null;
       }
       case "tool_input": {
+        // If no current tool call yet, start one (Kiro sometimes sends input with name on first chunk)
+        if (!this.currentToolCall && data.name) {
+          this.currentToolCall = {
+            id: (data.toolUseId as string) || generateToolCallId(),
+            name: (data.name as string) || "",
+            arguments: "",
+          };
+        }
         if (this.currentToolCall) {
           const inputData = data.input;
           const inputStr =
-            typeof inputData === "object" && inputData !== null
-              ? JSON.stringify(inputData)
-              : inputData
-                ? String(inputData)
-                : "";
+            typeof inputData === "string"
+              ? inputData
+              : typeof inputData === "object" && inputData !== null
+                ? JSON.stringify(inputData)
+                : inputData
+                  ? String(inputData)
+                  : "";
           this.currentToolCall.arguments += inputStr;
         }
         return null;
@@ -183,12 +197,18 @@ export class AwsEventStreamParser {
         return null;
       }
       case "usage":
+        this.seenUsage = true;
         return { type: "usage", data: data.usage ?? 0 };
       case "context_usage":
         return { type: "context_usage", data: data.contextUsagePercentage ?? 0 };
       default:
         return null;
     }
+  }
+
+  /** Returns true when Kiro has finished sending (usage received + no pending tool call) */
+  isComplete(): boolean {
+    return this.seenUsage && this.currentToolCall === null;
   }
 
   private finalizeToolCall(): void {
@@ -224,6 +244,7 @@ export class AwsEventStreamParser {
     this.lastContent = null;
     this.currentToolCall = null;
     this.toolCalls = [];
+    this.seenUsage = false;
   }
 }
 
