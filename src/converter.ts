@@ -117,8 +117,10 @@ function buildToolSpecs(
 
   for (const tool of tools) {
     let description = tool.description || `Tool: ${tool.name}`;
+    // AI SDK V2 uses `inputSchema` (not `parameters`)
+    const rawSchema = (tool as Record<string, unknown>).inputSchema ?? (tool as Record<string, unknown>).parameters;
     const sanitizedParams = sanitizeJsonSchema(
-      tool.parameters as Record<string, unknown> | undefined,
+      rawSchema as Record<string, unknown> | undefined,
     );
 
     // Move long descriptions to system prompt
