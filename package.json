@@ -1,6 +1,6 @@
 {
   "name": "00bx-kiro-gateway",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI SDK provider for free Claude models via Kiro CLI — use with OpenCode",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -31,6 +31,14 @@
   ],
   "author": "00bx",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/00bx/00bx-kiro-gateway"
+  },
+  "homepage": "https://github.com/00bx/00bx-kiro-gateway#readme",
+  "bugs": {
+    "url": "https://github.com/00bx/00bx-kiro-gateway/issues"
+  },
   "devDependencies": {
     "@ai-sdk/provider": "^3.0.8",
     "@types/node": "^22.0.0",
