@@ -1,5 +1,7 @@
 # 00bx-kiro-gateway
 
+![00bx Kiro Gateway](poster.jpg)
+
 [AI SDK](https://sdk.vercel.ai) provider that lets [OpenCode](https://opencode.ai) use Claude models through [Kiro CLI](https://kiro.dev)'s free-tier credits.
 
 ## How it works
